@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MQTT Dashboard</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo">◎</div>
+        <div>
+          <div class="title">MQTT Dashboard</div>
+          <div class="subtitle">Image fetch + real-time telemetry</div>
+        </div>
+      </div>
+
+      <div class="status">
+        <span class="dot" id="mqttDot"></span>
+        <span id="mqttText">MQTT: connecting…</span>
+      </div>
+    </header>
+
+    <main class="grid">
+      <section class="card">
+        <div class="cardHeader">
+          <h2>Camera / Image</h2>
+          <button id="btnLoad" class="btn">
+            <span class="btnIcon">⟳</span> Load image
+          </button>
+        </div>
+
+        <div class="imageWrap">
+          <div id="imgSkeleton" class="skeleton">Loading…</div>
+          <img id="imgView" alt="Fetched image" />
+        </div>
+
+        <div class="hint">
+          The image is fetched by the backend at <code>/api/image</code> (avoids CORS).
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="cardHeader">
+          <h2>Telemetry</h2>
+          <div class="pill" id="topicPill">topic: —</div>
+        </div>
+
+        <div class="tempRow">
+          <div class="tempValue">
+            <span id="tempNumber">—</span>
+            <span class="unit">°C</span>
+          </div>
+          <div class="tempMeta">
+            <div>Last update:</div>
+            <div id="tempTs">—</div>
+          </div>
+        </div>
+
+        <div class="telemetryRow">
+          <div class="telemetryStat">
+            <div class="label">Humidity</div>
+            <div class="value">
+              <span id="humidityNumber">—</span>
+              <span class="unit">%</span>
+            </div>
+          </div>
+          <div class="telemetryStat">
+            <div class="label">Pressure</div>
+            <div class="value">
+              <span id="pressureNumber">—</span>
+              <span class="unit">hPa</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="chartWrap">
+          <canvas id="tempChart" width="800" height="260"></canvas>
+        </div>
+
+        <div class="hint">
+          Accepts MQTT payload as JSON (<code>{"temperature": 23.5, "humidity": 45, "pressure": 1012}</code>) or plain (<code>23.5</code>).
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Local dashboard • Node.js + MQTT + Socket.IO</span>
+    </footer>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
