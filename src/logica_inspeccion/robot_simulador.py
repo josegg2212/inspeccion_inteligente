@@ -6,7 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-import cv2
+import libcamera
+from picamera2 import Picamera2
 
 from .cliente_api import ClienteAPI
 
@@ -30,39 +31,54 @@ class ZonaInspeccion:
 
 
 class Camara:
-    """Captura simple con OpenCV VideoCapture (como en muchas prácticas)."""
+    """Captura con PiCamera2 (como en la práctica)."""
 
-    def __init__(self, device_index: int = 0, width: int = 1280, height: int = 720) -> None:
-        self.device_index = device_index
-        self.width = width
-        self.height = height
-        self.cap: Optional[cv2.VideoCapture] = None
+    def __init__(
+        self,
+        main_size: tuple[int, int] = (1920, 1080),
+        lores_size: tuple[int, int] = (640, 480),
+        vflip: bool = True,
+        hflip: bool = False,
+    ) -> None:
+        self.main_size = main_size
+        self.lores_size = lores_size
+        self.vflip = vflip
+        self.hflip = hflip
+        self.cam: Optional[Picamera2] = None
 
     def start(self) -> None:
-        self.cap = cv2.VideoCapture(self.device_index)
-        if not self.cap.isOpened():
-            raise RuntimeError(f"No se pudo abrir la cámara (index={self.device_index})")
-        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
-        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+        self.cam = Picamera2()
+
+        cfg = self.cam.create_still_configuration(
+            main={"size": self.main_size},
+            lores={"size": self.lores_size},
+            display="lores",
+        )
+        cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
+
+        self.cam.configure(cfg)
+        self.cam.start()
+        time.sleep(0.2)  # warm-up corto
 
     def captura(self, output_path: Path) -> Path:
-        if self.cap is None or not self.cap.isOpened():
+        if self.cam is None:
             raise RuntimeError("Cámara no iniciada. Llama a start().")
 
-        ok, frame = self.cap.read()
-        if not ok or frame is None:
-            raise RuntimeError("No se pudo capturar frame.")
-
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        ok2 = cv2.imwrite(str(output_path), frame)
-        if not ok2:
-            raise RuntimeError(f"No se pudo guardar imagen en {output_path}")
+        self.cam.capture_file(str(output_path))
         return output_path
 
     def stop(self) -> None:
-        if self.cap is not None:
-            self.cap.release()
-        self.cap = None
+        if self.cam is not None:
+            try:
+                self.cam.stop()
+            except Exception:
+                pass
+            try:
+                self.cam.close()
+            except Exception:
+                pass
+        self.cam = None
 
 
 class RobotInspeccion:
@@ -142,7 +158,12 @@ def main() -> None:
         ZonaInspeccion("zona_B", "bar", 0.0, 16.0, espera_s=7.0),
     ]
 
-    camara = Camara(device_index=0)
+    camara = Camara(
+        main_size=(1920, 1080),
+        lores_size=(640, 480),
+        vflip=True,
+        hflip=False,
+    )
     api = ClienteAPI(url_md=url_md)
     robot = RobotInspeccion(zonas=zonas, camara=camara, api=api, evidencias_dir=evidencias_dir, loop=True)
     robot.run()
