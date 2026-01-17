@@ -31,21 +31,19 @@ class ZonaInspeccion:
 
 
 class Camara:
-    """Preview estilo libcamera-hello (4:3) + captura still (4:3) sin romper el preview."""
+    """
+    Preview tipo libcamera-hello:
+    - usa create_preview_configuration() SIN forzar tamaños (evita el "zoom" por crop)
+    - captura still con create_still_configuration() también por defecto
+    """
 
     def __init__(
         self,
-        # PREVIEW 4:3 para que NO recorte (igual que libcamera-hello)
-        preview_size: tuple[int, int] = (640, 480),
-        # STILL 4:3 para mantener el mismo campo de visión que el preview
-        still_size: tuple[int, int] = (2592, 1944),  # 4:3 típico (v2). Puedes bajar si quieres.
         vflip: bool = True,
         hflip: bool = False,
         preview: bool = True,
         preview_mode: str = "qt",  # "qt" | "drm" | "null"
     ) -> None:
-        self.preview_size = preview_size
-        self.still_size = still_size
         self.vflip = vflip
         self.hflip = hflip
         self.preview = preview
@@ -55,10 +53,9 @@ class Camara:
     def start(self) -> None:
         self.cam = Picamera2()
 
-        # Preview config (4:3) -> se ve como libcamera-hello
-        preview_cfg = self.cam.create_preview_configuration(
-            main={"size": self.preview_size},
-        )
+        # ✅ Esto es lo más parecido a libcamera-hello:
+        # NO forzar tamaños -> evitas crop/zoom raro.
+        preview_cfg = self.cam.create_preview_configuration()
         preview_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
         self.cam.configure(preview_cfg)
 
@@ -76,7 +73,7 @@ class Camara:
         self.cam.start()
         time.sleep(0.2)
 
-        # Autofocus continuo si existe (Camera Module 3). Si no, no pasa nada.
+        # Autofocus continuo si existiera (en v2 normalmente no aplica, pero no molesta)
         try:
             self.cam.set_controls({"AfMode": 2})
         except Exception:
@@ -88,10 +85,8 @@ class Camara:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Still config (también 4:3) para que la foto tenga el MISMO FOV que el preview
-        still_cfg = self.cam.create_still_configuration(
-            main={"size": self.still_size},
-        )
+        # Still por defecto (sin forzar tamaños) -> evita crop inesperado
+        still_cfg = self.cam.create_still_configuration()
         still_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
 
         self.cam.switch_mode_and_capture_file(still_cfg, str(output_path))
@@ -199,8 +194,6 @@ def main() -> None:
     ]
 
     camara = Camara(
-        preview_size=(640, 480),        # como libcamera-hello
-        still_size=(2592, 1944),        # 4:3 (mismo FOV que el preview)
         vflip=True,
         hflip=False,
         preview=True,
