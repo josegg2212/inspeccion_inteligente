@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -169,6 +170,13 @@ class RobotInspeccion:
 
                         if self.guardar_ultima:
                             (self.evidencias_dir / "last_result.jpg").write_bytes(out_bytes)
+
+                        # 3b) Si la lectura fue correcta (HTTP 200), guarda tambien en /ok
+                        if status == 200:
+                            ok_dir = self.evidencias_dir / "ok"
+                            ok_dir.mkdir(parents=True, exist_ok=True)
+                            (ok_dir / img_out.name).write_bytes(out_bytes)
+                            (ok_dir / "last_ok_result.jpg").write_bytes(out_bytes)
 
                     # 4) Info por consola
                     msg = headers.get("X-Message", "")

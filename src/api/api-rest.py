@@ -8,6 +8,10 @@
   - X-Message
   - X-Bounding-Boxes (JSON list)
 
+New:
+- Saves *successful* readings (HTTP 200) into ./ok/
+- Exposes GET /MD/last_ok that returns the last successfully processed image.
+
 This file inlines the previous ApiRestWrapper so you only need one script.
 """
 
@@ -15,7 +19,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import shutil
 
 import cv2
@@ -51,11 +54,16 @@ class ApiRestWrapper:
         uvicorn.run(self.app, host=self.host, port=self.port)
 
 
-TEMPORAL_PATH = "./temp"
+# Paths (keep temp ephemeral; keep ok persistent)
+BASE_DIR = Path(__file__).resolve().parent
+TEMP_DIR = BASE_DIR / "temp"
+OK_DIR = BASE_DIR / "ok"
+OK_RESULTS_DIR = OK_DIR / "results"
+OK_INPUTS_DIR = OK_DIR / "inputs"
+LAST_OK_PATH = OK_DIR / "last_ok.jpg"
 
 # Model weights
-PROJECT_ROOT = Path(__file__).resolve().parents[2]  
-
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DETECT_MODEL_PATH = str(PROJECT_ROOT / "models" / "manometer_detection_model.pt")
 LECTURE_MODEL_PATH = str(PROJECT_ROOT / "models" / "manometer_lecture_model.pt")
 
@@ -72,8 +80,17 @@ class ManometerDetect:
         self.MEASURE_MAX = 0.0
         self.MEASURE_MIN = 0.0
 
+        # Ensure persistent dirs exist
+        OK_INPUTS_DIR.mkdir(parents=True, exist_ok=True)
+        OK_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
         self.apirest_wrapper = ApiRestWrapper(self.host, self.port)
-        self.apirest_wrapper.setup_routes([(endpoint, ["POST"], self.endpoint_callback)])
+        self.apirest_wrapper.setup_routes(
+            [
+                (endpoint, ["POST"], self.endpoint_callback),
+                (endpoint + "/last_ok", ["GET"], self.get_last_ok),
+            ]
+        )
 
     def start(self):
         self.apirest_wrapper.run_app()
@@ -113,6 +130,18 @@ class ManometerDetect:
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    def get_last_ok(self):
+        """Return the last successfully processed image (HTTP 200)."""
+        if not LAST_OK_PATH.exists():
+            raise HTTPException(status_code=404, detail="No successful image processed yet")
+
+        return FileResponse(
+            str(LAST_OK_PATH),
+            media_type="image/jpeg",
+            headers={"X-Message": "Last successfully processed image"},
+            status_code=200,
+        )
+
     def process_image(self, file: UploadFile, config_data: dict):
         # Store metadata parameters
         try:
@@ -127,17 +156,22 @@ class ManometerDetect:
                 "bboxes": np.zeros((0, 4), dtype=int),
             }
 
-        if os.path.exists(TEMPORAL_PATH):
-            shutil.rmtree(TEMPORAL_PATH)
-        os.makedirs(TEMPORAL_PATH, exist_ok=True)
+        # Clean temp for this request
+        if TEMP_DIR.exists():
+            shutil.rmtree(TEMP_DIR)
+        TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
         # Save input file to disk
-        file_path = os.path.join(TEMPORAL_PATH, file.filename)
+        file_path = TEMP_DIR / file.filename
         with open(file_path, "wb") as f:
             f.write(file.file.read())
 
+        # Keep a copy of the original input (because we overwrite file_path after crop)
+        raw_copy_path = TEMP_DIR / f"raw_{file.filename}"
+        shutil.copyfile(file_path, raw_copy_path)
+
         # 1) Detect & crop manometer
-        response = self.detect_manometer(file_path)
+        response = self.detect_manometer(str(file_path))
         if response["code"] != 200:
             return response
         detected_image_path = response["data"]
@@ -154,7 +188,7 @@ class ManometerDetect:
         points = response["data"]["points"]
 
         # 3) Save final annotated image
-        return self.save_output_image(
+        out = self.save_output_image(
             file.filename,
             detected_image_path,
             angle,
@@ -163,6 +197,34 @@ class ManometerDetect:
             points,
             bboxes,
         )
+
+        # 4) Persist ONLY if it was a successful reading
+        if out.get("code") == 200:
+            try:
+                self.persist_success(raw_copy_path, Path(out["data"]), file.filename)
+            except Exception:
+                # Don't break the request just because persistence failed
+                pass
+
+        return out
+
+    def persist_success(self, raw_path: Path, result_path: Path, original_filename: str) -> None:
+        """Copy successful inputs/results to ./ok and update ./ok/last_ok.jpg."""
+        OK_INPUTS_DIR.mkdir(parents=True, exist_ok=True)
+        OK_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Inputs: keep original filename
+        dst_in = OK_INPUTS_DIR / original_filename
+        shutil.copyfile(raw_path, dst_in)
+
+        # Results: same naming scheme used in save_output_image
+        name, extension = original_filename.rsplit(".", 1)
+        result_name = f"{name}_result.{extension}"
+        dst_out = OK_RESULTS_DIR / result_name
+        shutil.copyfile(result_path, dst_out)
+
+        # Update last_ok
+        shutil.copyfile(dst_out, LAST_OK_PATH)
 
     def detect_manometer(self, file_path: str, crop: bool = True):
         try:
@@ -173,6 +235,7 @@ class ManometerDetect:
                 "code": 400,
                 "message": f"Error in YOLO detection with model {DETECT_MODEL_PATH}: {e}",
                 "data": "",
+                "bboxes": np.zeros((0, 4), dtype=int),
             }
 
         if getattr(bboxes, "shape", (0,))[0] > 0:
@@ -200,7 +263,7 @@ class ManometerDetect:
 
         return {
             "code": 206,
-            "message": "Not manometers found",
+            "message": "No manometers found",
             "data": file_path,
             "bboxes": bboxes.cpu().numpy().astype(int),
         }
@@ -230,6 +293,7 @@ class ManometerDetect:
                 "code": 400,
                 "message": f"Error in YOLO lecture with model {LECTURE_MODEL_PATH}: {e}",
                 "data": "",
+                "bboxes": np.zeros((0, 4), dtype=int),
             }
 
         if len(points) > 3:
@@ -249,6 +313,7 @@ class ManometerDetect:
             "code": 206,
             "message": "Cannot calculate regress angle, lecture is not completed",
             "data": detected_image_path,
+            "bboxes": np.zeros((0, 4), dtype=int),
         }
 
     def compute_geometry(self, points: dict):
@@ -314,12 +379,12 @@ class ManometerDetect:
 
         name, extension = filename.rsplit(".", 1)
         result_name = f"{name}_result.{extension}"
-        out_path = os.path.join(TEMPORAL_PATH, result_name)
+        out_path = TEMP_DIR / result_name
 
-        plt.savefig(out_path, bbox_inches="tight", pad_inches=0)
+        plt.savefig(str(out_path), bbox_inches="tight", pad_inches=0)
         plt.close()
 
-        return {"code": 200, "message": "Image saved", "data": out_path, "bboxes": bboxes}
+        return {"code": 200, "message": "Image saved", "data": str(out_path), "bboxes": bboxes}
 
     def get_level_from_angle(self, angle: float, max_angle: float, min_angle: float) -> float:
         level = 100 * (angle - min_angle) / (max_angle - min_angle)
