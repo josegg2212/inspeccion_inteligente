@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -34,18 +34,23 @@ class ZonaInspeccion:
 
 class Camara:
     """
-    Preview tipo libcamera-hello:
-    - usa create_preview_configuration() SIN forzar tamaños (evita el "zoom" por crop)
-    - captura como array y guarda con OpenCV (evita crash de simplejpeg)
+    Igual que el script que te funciona:
+    - preview QTGL (o QT) a 640x480
+    - forzar ScalerCrop al sensor completo (evita el mega zoom)
+    - captura con capture_array + cv2.imwrite (evita simplejpeg)
     """
 
     def __init__(
         self,
+        preview_size: Tuple[int, int] = (640, 480),
+        sensor_full_crop: Tuple[int, int, int, int] = (0, 0, 3280, 2464),  # Camera v2
         vflip: bool = True,
         hflip: bool = False,
         preview: bool = True,
-        preview_mode: str = "qt",  # "qt" | "drm" | "null"
+        preview_mode: str = "qtgl",  # "qtgl" | "qt" | "drm" | "null"
     ) -> None:
+        self.preview_size = preview_size
+        self.sensor_full_crop = sensor_full_crop
         self.vflip = vflip
         self.hflip = hflip
         self.preview = preview
@@ -55,13 +60,15 @@ class Camara:
     def start(self) -> None:
         self.cam = Picamera2()
 
-        preview_cfg = self.cam.create_preview_configuration()
-        preview_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
-        self.cam.configure(preview_cfg)
+        cfg = self.cam.create_preview_configuration(main={"size": self.preview_size})
+        cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
+        self.cam.configure(cfg)
 
         if self.preview:
             try:
-                if self.preview_mode == "qt":
+                if self.preview_mode == "qtgl":
+                    self.cam.start_preview(Preview.QTGL)
+                elif self.preview_mode == "qt":
                     self.cam.start_preview(Preview.QT)
                 elif self.preview_mode == "drm":
                     self.cam.start_preview(Preview.DRM)
@@ -73,11 +80,11 @@ class Camara:
         self.cam.start()
         time.sleep(0.2)
 
-        # En v2 normalmente no hay AF, pero no molesta si falla
+        # 👇 CLAVE: evita el "mega zoom" fijando el crop al sensor completo (v2)
         try:
-            self.cam.set_controls({"AfMode": 2})
-        except Exception:
-            pass
+            self.cam.set_controls({"ScalerCrop": self.sensor_full_crop})
+        except Exception as e:
+            print(f"[Camara] No se pudo aplicar ScalerCrop={self.sensor_full_crop}: {e}")
 
     def captura(self, output_path: Path) -> Path:
         if self.cam is None:
@@ -85,13 +92,9 @@ class Camara:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Captura desde el stream principal del preview (RGB)
-        frame = self.cam.capture_array("main")
-
-        # Asegura memoria contigua (evita problemas de encoding)
+        frame = self.cam.capture_array("main")  # RGB
         frame = np.ascontiguousarray(frame)
 
-        # Guardar a JPG con OpenCV (BGR)
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
         if not cv2.imwrite(str(output_path), frame_bgr):
             raise RuntimeError(f"No se pudo guardar imagen en {output_path}")
@@ -200,10 +203,12 @@ def main() -> None:
     ]
 
     camara = Camara(
+        preview_size=(640, 480),
+        sensor_full_crop=(0, 0, 3280, 2464),  # Camera v2
         vflip=True,
         hflip=False,
         preview=True,
-        preview_mode="qt",
+        preview_mode="qtgl",  # como el script que te funciona
     )
 
     api = ClienteAPI(url_md=url_md)
