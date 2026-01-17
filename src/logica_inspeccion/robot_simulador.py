@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import libcamera
-from picamera2 import Picamera2
+from picamera2 import Picamera2, Preview
 
 from .cliente_api import ClienteAPI
 
@@ -31,7 +31,7 @@ class ZonaInspeccion:
 
 
 class Camara:
-    """Captura con PiCamera2 (como en la práctica)."""
+    """Captura con PiCamera2 (como en la práctica) + preview opcional."""
 
     def __init__(
         self,
@@ -39,11 +39,15 @@ class Camara:
         lores_size: tuple[int, int] = (640, 480),
         vflip: bool = True,
         hflip: bool = False,
+        preview: bool = True,
+        preview_mode: str = "qt",  # "qt" | "drm" | "null"
     ) -> None:
         self.main_size = main_size
         self.lores_size = lores_size
         self.vflip = vflip
         self.hflip = hflip
+        self.preview = preview
+        self.preview_mode = preview_mode.lower()
         self.cam: Optional[Picamera2] = None
 
     def start(self) -> None:
@@ -57,6 +61,20 @@ class Camara:
         cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
 
         self.cam.configure(cfg)
+
+        # Preview (como en prácticas)
+        if self.preview:
+            try:
+                if self.preview_mode == "qt":
+                    self.cam.start_preview(Preview.QT)
+                elif self.preview_mode == "drm":
+                    self.cam.start_preview(Preview.DRM)
+                else:
+                    # "null": sin ventana, útil por SSH
+                    self.cam.start_preview(Preview.NULL)
+            except Exception as e:
+                print(f"[Camara] No se pudo iniciar preview ({self.preview_mode}): {e}")
+
         self.cam.start()
         time.sleep(0.2)  # warm-up corto
 
@@ -70,6 +88,11 @@ class Camara:
 
     def stop(self) -> None:
         if self.cam is not None:
+            try:
+                if self.preview:
+                    self.cam.stop_preview()
+            except Exception:
+                pass
             try:
                 self.cam.stop()
             except Exception:
@@ -91,12 +114,14 @@ class RobotInspeccion:
         api: ClienteAPI,
         evidencias_dir: Path,
         loop: bool = True,
+        guardar_ultima: bool = True,  # guarda siempre data/evidencias/last.jpg
     ) -> None:
         self.zonas = zonas
         self.camara = camara
         self.api = api
         self.evidencias_dir = evidencias_dir
         self.loop = loop
+        self.guardar_ultima = guardar_ultima
         self.running = False
 
     def run(self) -> None:
@@ -116,6 +141,14 @@ class RobotInspeccion:
                     # 1) Captura
                     self.camara.captura(img_in)
 
+                    # (opcional) deja un "last.jpg" para ver rápido qué está viendo
+                    if self.guardar_ultima:
+                        last_in = self.evidencias_dir / "last.jpg"
+                        try:
+                            last_in.write_bytes(img_in.read_bytes())
+                        except Exception:
+                            pass
+
                     # 2) POST a la API
                     status, headers, out_bytes = self.api.procesar(img_in, zona.metadata_dict())
 
@@ -123,6 +156,13 @@ class RobotInspeccion:
                     if out_bytes:
                         img_out.parent.mkdir(parents=True, exist_ok=True)
                         img_out.write_bytes(out_bytes)
+
+                        if self.guardar_ultima:
+                            last_out = self.evidencias_dir / "last_result.jpg"
+                            try:
+                                last_out.write_bytes(out_bytes)
+                            except Exception:
+                                pass
 
                     # 4) Info por consola (simple)
                     msg = headers.get("X-Message", "")
@@ -145,27 +185,38 @@ class RobotInspeccion:
 
 
 def main() -> None:
-    # raíz del proyecto: .../src/logica_inspeccion/robot_simulador.py -> sube 2 niveles
     project_root = Path(__file__).resolve().parents[2]
     evidencias_dir = project_root / "data" / "evidencias"
 
-    # Si la API corre en la misma Raspberry:
     url_md = "http://127.0.0.1:5000/MD"
-    # Si accedes a una API en otra máquina: url_md = "http://IP:5000/MD"
 
     zonas = [
         ZonaInspeccion("zona_A", "bar", 0.0, 10.0, espera_s=5.0),
         ZonaInspeccion("zona_B", "bar", 0.0, 16.0, espera_s=7.0),
     ]
 
+    # preview_mode:
+    # - "qt"  -> si estás en escritorio con ventana
+    # - "drm" -> si tienes HDMI y no usas X11
+    # - "null"-> si estás por SSH y no quieres ventana
     camara = Camara(
         main_size=(1920, 1080),
         lores_size=(640, 480),
         vflip=True,
         hflip=False,
+        preview=True,
+        preview_mode="qt",
     )
+
     api = ClienteAPI(url_md=url_md)
-    robot = RobotInspeccion(zonas=zonas, camara=camara, api=api, evidencias_dir=evidencias_dir, loop=True)
+    robot = RobotInspeccion(
+        zonas=zonas,
+        camara=camara,
+        api=api,
+        evidencias_dir=evidencias_dir,
+        loop=True,
+        guardar_ultima=True,
+    )
     robot.run()
 
 
