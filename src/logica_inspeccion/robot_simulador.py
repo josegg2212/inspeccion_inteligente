@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
+import cv2
+import numpy as np
 import libcamera
 from picamera2 import Picamera2, Preview
 
@@ -34,7 +36,7 @@ class Camara:
     """
     Preview tipo libcamera-hello:
     - usa create_preview_configuration() SIN forzar tamaños (evita el "zoom" por crop)
-    - captura still con create_still_configuration() también por defecto
+    - captura como array y guarda con OpenCV (evita crash de simplejpeg)
     """
 
     def __init__(
@@ -53,8 +55,6 @@ class Camara:
     def start(self) -> None:
         self.cam = Picamera2()
 
-        # ✅ Esto es lo más parecido a libcamera-hello:
-        # NO forzar tamaños -> evitas crop/zoom raro.
         preview_cfg = self.cam.create_preview_configuration()
         preview_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
         self.cam.configure(preview_cfg)
@@ -73,7 +73,7 @@ class Camara:
         self.cam.start()
         time.sleep(0.2)
 
-        # Autofocus continuo si existiera (en v2 normalmente no aplica, pero no molesta)
+        # En v2 normalmente no hay AF, pero no molesta si falla
         try:
             self.cam.set_controls({"AfMode": 2})
         except Exception:
@@ -85,11 +85,17 @@ class Camara:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Still por defecto (sin forzar tamaños) -> evita crop inesperado
-        still_cfg = self.cam.create_still_configuration()
-        still_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
+        # Captura desde el stream principal del preview (RGB)
+        frame = self.cam.capture_array("main")
 
-        self.cam.switch_mode_and_capture_file(still_cfg, str(output_path))
+        # Asegura memoria contigua (evita problemas de encoding)
+        frame = np.ascontiguousarray(frame)
+
+        # Guardar a JPG con OpenCV (BGR)
+        frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+        if not cv2.imwrite(str(output_path), frame_bgr):
+            raise RuntimeError(f"No se pudo guardar imagen en {output_path}")
+
         return output_path
 
     def stop(self) -> None:
