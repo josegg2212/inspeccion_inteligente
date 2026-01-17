@@ -31,19 +31,21 @@ class ZonaInspeccion:
 
 
 class Camara:
-    """Preview tipo `libcamera-hello` + captura still sin fastidiar el preview."""
+    """Preview estilo libcamera-hello (4:3) + captura still (4:3) sin romper el preview."""
 
     def __init__(
         self,
-        still_size: tuple[int, int] = (1920, 1080),   # calidad de la foto guardada
-        preview_size: tuple[int, int] = (1280, 720),  # calidad del preview (fluido y nítido)
+        # PREVIEW 4:3 para que NO recorte (igual que libcamera-hello)
+        preview_size: tuple[int, int] = (640, 480),
+        # STILL 4:3 para mantener el mismo campo de visión que el preview
+        still_size: tuple[int, int] = (2592, 1944),  # 4:3 típico (v2). Puedes bajar si quieres.
         vflip: bool = True,
         hflip: bool = False,
         preview: bool = True,
         preview_mode: str = "qt",  # "qt" | "drm" | "null"
     ) -> None:
-        self.still_size = still_size
         self.preview_size = preview_size
+        self.still_size = still_size
         self.vflip = vflip
         self.hflip = hflip
         self.preview = preview
@@ -53,15 +55,13 @@ class Camara:
     def start(self) -> None:
         self.cam = Picamera2()
 
-        # PREVIEW config (se ve como libcamera-hello)
+        # Preview config (4:3) -> se ve como libcamera-hello
         preview_cfg = self.cam.create_preview_configuration(
             main={"size": self.preview_size},
         )
         preview_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
-
         self.cam.configure(preview_cfg)
 
-        # Preview
         if self.preview:
             try:
                 if self.preview_mode == "qt":
@@ -74,9 +74,9 @@ class Camara:
                 print(f"[Camara] No se pudo iniciar preview ({self.preview_mode}): {e}")
 
         self.cam.start()
-        time.sleep(0.2)  # warm-up corto
+        time.sleep(0.2)
 
-        # Autofocus continuo si tu cámara lo soporta (Camera Module 3)
+        # Autofocus continuo si existe (Camera Module 3). Si no, no pasa nada.
         try:
             self.cam.set_controls({"AfMode": 2})
         except Exception:
@@ -88,13 +88,12 @@ class Camara:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # STILL config (calidad) y captura sin romper el preview
+        # Still config (también 4:3) para que la foto tenga el MISMO FOV que el preview
         still_cfg = self.cam.create_still_configuration(
             main={"size": self.still_size},
         )
         still_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
 
-        # Cambia a modo still, captura, y vuelve al preview automáticamente
         self.cam.switch_mode_and_capture_file(still_cfg, str(output_path))
         return output_path
 
@@ -153,13 +152,8 @@ class RobotInspeccion:
                     # 1) Captura
                     self.camara.captura(img_in)
 
-                    # (opcional) deja un "last.jpg" para ver rápido qué está viendo
                     if self.guardar_ultima:
-                        last_in = self.evidencias_dir / "last.jpg"
-                        try:
-                            last_in.write_bytes(img_in.read_bytes())
-                        except Exception:
-                            pass
+                        (self.evidencias_dir / "last.jpg").write_bytes(img_in.read_bytes())
 
                     # 2) POST a la API
                     status, headers, out_bytes = self.api.procesar(img_in, zona.metadata_dict())
@@ -170,13 +164,9 @@ class RobotInspeccion:
                         img_out.write_bytes(out_bytes)
 
                         if self.guardar_ultima:
-                            last_out = self.evidencias_dir / "last_result.jpg"
-                            try:
-                                last_out.write_bytes(out_bytes)
-                            except Exception:
-                                pass
+                            (self.evidencias_dir / "last_result.jpg").write_bytes(out_bytes)
 
-                    # 4) Info por consola (simple)
+                    # 4) Info por consola
                     msg = headers.get("X-Message", "")
                     bboxes = headers.get("X-Bounding-Boxes", "[]")
                     print(f"[{zona.id}] status={status} msg='{msg}' bboxes={bboxes}")
@@ -199,6 +189,7 @@ class RobotInspeccion:
 def main() -> None:
     project_root = Path(__file__).resolve().parents[2]
     evidencias_dir = project_root / "data" / "evidencias"
+    evidencias_dir.mkdir(parents=True, exist_ok=True)
 
     url_md = "http://127.0.0.1:5000/MD"
 
@@ -207,13 +198,9 @@ def main() -> None:
         ZonaInspeccion("zona_B", "bar", 0.0, 16.0, espera_s=7.0),
     ]
 
-    # preview_mode:
-    # - "qt"  -> si estás en escritorio con ventana
-    # - "drm" -> si tienes HDMI y no usas X11
-    # - "null"-> si estás por SSH y no quieres ventana
     camara = Camara(
-        still_size=(1920, 1080),
-        preview_size=(1280, 720),
+        preview_size=(640, 480),        # como libcamera-hello
+        still_size=(2592, 1944),        # 4:3 (mismo FOV que el preview)
         vflip=True,
         hflip=False,
         preview=True,
