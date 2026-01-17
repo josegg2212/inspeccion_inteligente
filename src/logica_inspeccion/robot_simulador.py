@@ -31,19 +31,19 @@ class ZonaInspeccion:
 
 
 class Camara:
-    """Captura con PiCamera2 (como en la práctica) + preview opcional."""
+    """Preview tipo `libcamera-hello` + captura still sin fastidiar el preview."""
 
     def __init__(
         self,
-        main_size: tuple[int, int] = (1920, 1080),
-        lores_size: tuple[int, int] = (640, 480),
+        still_size: tuple[int, int] = (1920, 1080),   # calidad de la foto guardada
+        preview_size: tuple[int, int] = (1280, 720),  # calidad del preview (fluido y nítido)
         vflip: bool = True,
         hflip: bool = False,
         preview: bool = True,
         preview_mode: str = "qt",  # "qt" | "drm" | "null"
     ) -> None:
-        self.main_size = main_size
-        self.lores_size = lores_size
+        self.still_size = still_size
+        self.preview_size = preview_size
         self.vflip = vflip
         self.hflip = hflip
         self.preview = preview
@@ -53,16 +53,15 @@ class Camara:
     def start(self) -> None:
         self.cam = Picamera2()
 
-        cfg = self.cam.create_still_configuration(
-            main={"size": self.main_size},
-            lores={"size": self.lores_size},
-            display="lores",
+        # PREVIEW config (se ve como libcamera-hello)
+        preview_cfg = self.cam.create_preview_configuration(
+            main={"size": self.preview_size},
         )
-        cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
+        preview_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
 
-        self.cam.configure(cfg)
+        self.cam.configure(preview_cfg)
 
-        # Preview (como en prácticas)
+        # Preview
         if self.preview:
             try:
                 if self.preview_mode == "qt":
@@ -70,7 +69,6 @@ class Camara:
                 elif self.preview_mode == "drm":
                     self.cam.start_preview(Preview.DRM)
                 else:
-                    # "null": sin ventana, útil por SSH
                     self.cam.start_preview(Preview.NULL)
             except Exception as e:
                 print(f"[Camara] No se pudo iniciar preview ({self.preview_mode}): {e}")
@@ -78,12 +76,26 @@ class Camara:
         self.cam.start()
         time.sleep(0.2)  # warm-up corto
 
+        # Autofocus continuo si tu cámara lo soporta (Camera Module 3)
+        try:
+            self.cam.set_controls({"AfMode": 2})
+        except Exception:
+            pass
+
     def captura(self, output_path: Path) -> Path:
         if self.cam is None:
             raise RuntimeError("Cámara no iniciada. Llama a start().")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        self.cam.capture_file(str(output_path))
+
+        # STILL config (calidad) y captura sin romper el preview
+        still_cfg = self.cam.create_still_configuration(
+            main={"size": self.still_size},
+        )
+        still_cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
+
+        # Cambia a modo still, captura, y vuelve al preview automáticamente
+        self.cam.switch_mode_and_capture_file(still_cfg, str(output_path))
         return output_path
 
     def stop(self) -> None:
@@ -114,7 +126,7 @@ class RobotInspeccion:
         api: ClienteAPI,
         evidencias_dir: Path,
         loop: bool = True,
-        guardar_ultima: bool = True,  # guarda siempre data/evidencias/last.jpg
+        guardar_ultima: bool = True,
     ) -> None:
         self.zonas = zonas
         self.camara = camara
@@ -200,8 +212,8 @@ def main() -> None:
     # - "drm" -> si tienes HDMI y no usas X11
     # - "null"-> si estás por SSH y no quieres ventana
     camara = Camara(
-        main_size=(1920, 1080),
-        lores_size=(640, 480),
+        still_size=(1920, 1080),
+        preview_size=(1280, 720),
         vflip=True,
         hflip=False,
         preview=True,
