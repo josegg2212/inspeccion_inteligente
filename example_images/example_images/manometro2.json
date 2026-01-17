@@ -1,0 +1,7 @@
+{
+  "MEASURE_SCALE":{
+    "UNIT":"bar",
+    "MIN":0,
+    "MAX":1
+  }
+}
