@@ -125,6 +125,29 @@ body {
 .btnIcon { opacity: 0.9; }
 
 /* Image block + skeleton */
+.imageGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .imageGrid { grid-template-columns: 1fr; }
+}
+
+.imageBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.imageLabel {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
 .imageWrap {
   position: relative;
   width: 100%;

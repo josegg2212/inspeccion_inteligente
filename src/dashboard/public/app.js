@@ -3,8 +3,10 @@
 const socket = io();
 
 const btnLoad = document.getElementById("btnLoad");
-const imgView = document.getElementById("imgView");
-const imgSkeleton = document.getElementById("imgSkeleton");
+const imgViewA = document.getElementById("imgViewA");
+const imgSkeletonA = document.getElementById("imgSkeletonA");
+const imgViewB = document.getElementById("imgViewB");
+const imgSkeletonB = document.getElementById("imgSkeletonB");
 
 const mqttDot = document.getElementById("mqttDot");
 const mqttText = document.getElementById("mqttText");
@@ -34,27 +36,33 @@ function formatTime(ts) {
   return d.toLocaleString();
 }
 
-// Carga la imagen de la API con cache-bust
-async function loadImage() {
-  imgSkeleton.style.display = "grid";
-  imgView.style.display = "none";
+// Carga imagen de una zona con cache-bust
+async function loadZoneImage(imgEl, skeletonEl, zoneId) {
+  skeletonEl.style.display = "grid";
+  imgEl.style.display = "none";
+  skeletonEl.textContent = "Loading…";
 
   // cache-bust query param
-  const url = `/api/image?ts=${Date.now()}`;
-  imgView.onload = () => {
-    imgSkeleton.style.display = "none";
-    imgView.style.display = "block";
+  const url = `/api/image/zone/${encodeURIComponent(zoneId)}?ts=${Date.now()}`;
+  imgEl.onload = () => {
+    skeletonEl.style.display = "none";
+    imgEl.style.display = "block";
   };
-  imgView.onerror = () => {
-    imgSkeleton.textContent = "Failed to load image";
+  imgEl.onerror = () => {
+    skeletonEl.textContent = "Failed to load image";
   };
-  imgView.src = url;
+  imgEl.src = url;
 }
 
-btnLoad.addEventListener("click", loadImage);
+function loadImages() {
+  loadZoneImage(imgViewA, imgSkeletonA, "zona_A");
+  loadZoneImage(imgViewB, imgSkeletonB, "zona_B");
+}
+
+btnLoad.addEventListener("click", loadImages);
 
 // Auto-load al iniciar
-loadImage();
+loadImages();
 
 // ----- Eventos de socket -----
 socket.on("mqtt_status", (data) => {

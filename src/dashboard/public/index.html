@@ -34,13 +34,25 @@
           </button>
         </div>
 
-        <div class="imageWrap">
-          <div id="imgSkeleton" class="skeleton">Loading…</div>
-          <img id="imgView" alt="Fetched image" />
+        <div class="imageGrid">
+          <div class="imageBlock">
+            <div class="imageLabel">Zona A (last OK)</div>
+            <div class="imageWrap">
+              <div id="imgSkeletonA" class="skeleton">Loading…</div>
+              <img id="imgViewA" alt="Fetched image zone A" />
+            </div>
+          </div>
+          <div class="imageBlock">
+            <div class="imageLabel">Zona B (last OK)</div>
+            <div class="imageWrap">
+              <div id="imgSkeletonB" class="skeleton">Loading…</div>
+              <img id="imgViewB" alt="Fetched image zone B" />
+            </div>
+          </div>
         </div>
 
         <div class="hint">
-          The image is fetched by the backend at <code>/api/image</code> (avoids CORS).
+          Images are fetched by the backend at <code>/api/image/zone/&lt;id&gt;</code> (avoids CORS).
         </div>
       </section>
 

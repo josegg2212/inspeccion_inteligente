@@ -8,12 +8,14 @@ const mqtt = require("mqtt");
 
 const PORT = Number(process.env.PORT || 3000);
 const IMAGE_URL = process.env.IMAGE_URL;
+const IMAGE_URL_ZONE_A = process.env.IMAGE_URL_ZONE_A;
+const IMAGE_URL_ZONE_B = process.env.IMAGE_URL_ZONE_B;
 const MQTT_URL = process.env.MQTT_URL;
 const MQTT_TOPIC = process.env.MQTT_TOPIC || "sensors/telemetry";
 
 // Validacion de variables de entorno minimas
-if (!IMAGE_URL) {
-  console.error("Missing IMAGE_URL in .env");
+if (!IMAGE_URL && !(IMAGE_URL_ZONE_A && IMAGE_URL_ZONE_B)) {
+  console.error("Missing IMAGE_URL or IMAGE_URL_ZONE_A/B in .env");
   process.exit(1);
 }
 if (!MQTT_URL) {
@@ -31,6 +33,9 @@ app.get("/api/health", (req, res) => {
 
 // Proxy de imagen para evitar CORS en el navegador
 app.get("/api/image", async (req, res) => {
+  if (!IMAGE_URL) {
+    return res.status(500).json({ error: "IMAGE_URL not configured" });
+  }
   try {
     const resp = await fetch(IMAGE_URL, { cache: "no-store" });
     if (!resp.ok) {
@@ -47,6 +52,39 @@ app.get("/api/image", async (req, res) => {
   } catch (err) {
     console.error("Image fetch error:", err);
     res.status(500).json({ error: "Image fetch error" });
+  }
+});
+
+function resolveZoneImageUrl(zoneId) {
+  if (zoneId === "zona_A" && IMAGE_URL_ZONE_A) return IMAGE_URL_ZONE_A;
+  if (zoneId === "zona_B" && IMAGE_URL_ZONE_B) return IMAGE_URL_ZONE_B;
+  if (IMAGE_URL) return `${IMAGE_URL}/${zoneId}`;
+  return null;
+}
+
+// Proxy de imagen por zona (A/B)
+app.get("/api/image/zone/:zoneId", async (req, res) => {
+  const zoneId = req.params.zoneId;
+  const url = resolveZoneImageUrl(zoneId);
+  if (!url) {
+    return res.status(500).json({ error: "Zone image URL not configured" });
+  }
+
+  try {
+    const resp = await fetch(url, { cache: "no-store" });
+    if (!resp.ok) {
+      return res.status(502).json({ error: "Failed to fetch image", status: resp.status });
+    }
+
+    const contentType = resp.headers.get("content-type") || "application/octet-stream";
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "no-store");
+
+    const arrayBuffer = await resp.arrayBuffer();
+    res.send(Buffer.from(arrayBuffer));
+  } catch (err) {
+    console.error("Zone image fetch error:", err);
+    res.status(500).json({ error: "Zone image fetch error" });
   }
 });
 

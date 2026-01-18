@@ -67,6 +67,7 @@ class ManometerDetect:
             [
                 ("/process_camera_image", ["POST"], self.procces_camera_image),
                 ("/get_last_ok", ["GET"], self.get_last_ok),
+                ("/get_last_ok/{zone_id}", ["GET"], self.get_last_ok_by_zone),
             ]
         )
 
@@ -117,6 +118,23 @@ class ManometerDetect:
             status_code=200,
         )
 
+    def get_last_ok_by_zone(self, zone_id: str):
+        # Endpoint auxiliar para consultar la ultima imagen exitosa por zona
+        safe_zone = "".join(c for c in zone_id if c.isalnum() or c in "-_")
+        if not safe_zone:
+            raise HTTPException(status_code=400, detail="Invalid zone_id")
+
+        zone_path = OK_DIR / f"last_ok_{safe_zone}.jpg"
+        if not zone_path.exists():
+            raise HTTPException(status_code=404, detail=f"No successful image for zone '{safe_zone}'")
+
+        return FileResponse(
+            str(zone_path),
+            media_type="image/jpeg",
+            headers={"X-Message": f"Last successfully processed image for zone {safe_zone}"},
+            status_code=200,
+        )
+
     # Orquestador del flujo: validacion -> temp -> deteccion -> lectura -> salida
     def process_image(self, file: UploadFile, config_data: dict):
         try:
@@ -130,6 +148,8 @@ class ManometerDetect:
                 "data": "",
                 "bboxes": np.zeros((0, 4), dtype=int),
             }
+
+        zone_id = config_data.get("ZONE_ID") or config_data.get("zone_id")
 
         # Limpia temp para esta request
         if TEMP_DIR.exists():
@@ -168,14 +188,14 @@ class ManometerDetect:
         # Persiste solo si fue una lectura exitosa
         if out.get("code") == 200:
             try:
-                self.persist_success(raw_copy_path, Path(out["data"]), file.filename)
+                self.persist_success(raw_copy_path, Path(out["data"]), file.filename, zone_id=zone_id)
             except Exception:
                 pass
 
         return out
 
     # Copia entradas/salidas a carpeta persistente y actualiza last_ok
-    def persist_success(self, raw_path: Path, result_path: Path, original_filename: str) -> None:
+    def persist_success(self, raw_path: Path, result_path: Path, original_filename: str, zone_id: str | None = None) -> None:
         OK_INPUTS_DIR.mkdir(parents=True, exist_ok=True)
         OK_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -191,6 +211,13 @@ class ManometerDetect:
 
         # Update last_ok
         shutil.copyfile(dst_out, LAST_OK_PATH)
+
+        # Update last_ok por zona si viene identificador
+        if zone_id:
+            safe_zone = "".join(c for c in zone_id if c.isalnum() or c in "-_")
+            if safe_zone:
+                zone_last_ok = OK_DIR / f"last_ok_{safe_zone}.jpg"
+                shutil.copyfile(dst_out, zone_last_ok)
 
     # Deteccion de manometro con YOLO (opcionalmente recorta)
     def detect_manometer(self, file_path: str, crop: bool = True):

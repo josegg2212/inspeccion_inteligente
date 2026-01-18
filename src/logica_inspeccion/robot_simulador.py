@@ -26,6 +26,7 @@ class ZonaInspeccion:
     def metadata_dict(self) -> dict:
         # Metadata esperada por la API para convertir angulo a unidades
         return {
+            "ZONE_ID": self.id,
             "MEASURE_SCALE": {
                 "UNIT": self.unit,
                 "MIN": self.min_value,
