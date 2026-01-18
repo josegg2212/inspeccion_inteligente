@@ -14,7 +14,7 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-python "$ROOT_DIR/src/api/api-rest.py" &
+python "$ROOT_DIR/src/api/api_rest.py" &
 PIDS+=("$!")
 
 python "$ROOT_DIR/src/mqtt/servidor_mqtt.py" &
