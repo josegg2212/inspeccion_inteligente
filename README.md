@@ -39,7 +39,7 @@ sudo apt install -y nodejs npm
 
 ```bash
 cd src/dashboard
-npm install
+npm install dotenv express mqtt socket.io
 cd ../..
 ```
 
@@ -50,13 +50,13 @@ Archivo: `src/dashboard/.env` (por defecto usa `http://0.0.0.0:5000` y `mqtt://0
 7) Levantar servicios y robot:
 
 ```bash
-./run_services.sh
+bash run_services.sh
 ```
 
 En otra terminal:
 
 ```bash
-./run_robot.sh
+bash run_robot.sh
 ```
 
 ## Dashboard

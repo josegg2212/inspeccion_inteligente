@@ -132,7 +132,7 @@ class RobotInspeccion:
 
                     # Cuenta atras en Sense HAT antes de capturar
                     if sense:
-                        for n in (5, 4, 3, 2, 1):
+                        for n in (10, 9, 8, 7, 6, 5, 4, 3, 2, 1):
                             sense.show_letter(str(n))
                             time.sleep(1)
                         sense.clear()
