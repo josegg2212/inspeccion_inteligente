@@ -3,6 +3,10 @@ uvicorn
 python-multipart
 ultralytics
 opencv-python
-numpy
+numpy<2
 matplotlib
 Pillow
+requests
+paho-mqtt
+sense-hat
+picamera2

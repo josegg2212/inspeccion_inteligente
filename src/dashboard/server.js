@@ -11,6 +11,7 @@ const IMAGE_URL = process.env.IMAGE_URL;
 const MQTT_URL = process.env.MQTT_URL;
 const MQTT_TOPIC = process.env.MQTT_TOPIC || "sensors/telemetry";
 
+// Validacion de variables de entorno minimas
 if (!IMAGE_URL) {
   console.error("Missing IMAGE_URL in .env");
   process.exit(1);
@@ -23,11 +24,12 @@ if (!MQTT_URL) {
 const app = express();
 app.use(express.static("public"));
 
+// Endpoint de salud para el dashboard
 app.get("/api/health", (req, res) => {
   res.json({ ok: true, mqttTopic: MQTT_TOPIC });
 });
 
-// Proxy endpoint to fetch the image server-side (avoids CORS)
+// Proxy de imagen para evitar CORS en el navegador
 app.get("/api/image", async (req, res) => {
   try {
     const resp = await fetch(IMAGE_URL, { cache: "no-store" });
@@ -39,7 +41,7 @@ app.get("/api/image", async (req, res) => {
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "no-store");
 
-    // Stream the image
+    // Devuelve el binario de la imagen
     const arrayBuffer = await resp.arrayBuffer();
     res.send(Buffer.from(arrayBuffer));
   } catch (err) {
@@ -64,6 +66,7 @@ const mqttOptions = {
 let latestTelemetry = null;
 let mqttConnected = false;
 
+// Conversor robusto para valores numericos opcionales
 function toNumber(value) {
   if (typeof value === "number") return value;
   if (typeof value === "string") {
@@ -104,6 +107,7 @@ function parseTelemetry(payload) {
 
 const mqttClient = mqtt.connect(MQTT_URL, mqttOptions);
 
+// Estado de conexion MQTT -> UI
 mqttClient.on("connect", () => {
   mqttConnected = true;
   console.log("MQTT connected:", MQTT_URL);
@@ -134,6 +138,7 @@ mqttClient.on("message", (topic, payload) => {
   const telemetry = parseTelemetry(payload);
   if (!telemetry) return;
 
+  // Emite datos hacia el dashboard
   latestTelemetry = telemetry;
   io.emit("telemetry", {
     temperature: telemetry.temperature,

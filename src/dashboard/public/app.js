@@ -18,19 +18,23 @@ const topicPill = document.getElementById("topicPill");
 const canvas = document.getElementById("tempChart");
 const ctx = canvas.getContext("2d");
 
+// Buffer circular de temperatura para el grafico
 const history = []; // {ts, value}
 const maxPoints = 60;
 
+// Estado de conexion MQTT en la UI
 function setMqttStatus(connected, error) {
   mqttDot.style.background = connected ? "var(--good)" : "var(--bad)";
   mqttText.textContent = connected ? "MQTT: connected" : `MQTT: disconnected${error ? " (" + error + ")" : ""}`;
 }
 
+// Formatea timestamp para mostrarlo en pantalla
 function formatTime(ts) {
   const d = new Date(ts);
   return d.toLocaleString();
 }
 
+// Carga la imagen de la API con cache-bust
 async function loadImage() {
   imgSkeleton.style.display = "grid";
   imgView.style.display = "none";
@@ -49,15 +53,16 @@ async function loadImage() {
 
 btnLoad.addEventListener("click", loadImage);
 
-// Auto-load once
+// Auto-load al iniciar
 loadImage();
 
-// ----- Socket events -----
+// ----- Eventos de socket -----
 socket.on("mqtt_status", (data) => {
   setMqttStatus(Boolean(data.connected), data.error);
 });
 
 socket.on("telemetry", (data) => {
+  // Normaliza payloads con o sin campos opcionales
   const temperature = Number(data.temperature ?? data.value);
   const humidity = Number(data.humidity);
   const pressure = Number(data.pressure);
@@ -87,14 +92,14 @@ socket.on("telemetry", (data) => {
   }
 });
 
-// ----- Simple canvas chart -----
+// ----- Grafico simple en canvas -----
 function drawChart() {
   const w = canvas.width;
   const h = canvas.height;
 
   ctx.clearRect(0, 0, w, h);
 
-  // Background grid
+  // Fondo con grid suave
   ctx.globalAlpha = 1;
   ctx.lineWidth = 1;
   ctx.strokeStyle = "rgba(255,255,255,0.10)";
@@ -118,7 +123,7 @@ function drawChart() {
   maxV += pad;
   if (minV === maxV) { minV -= 1; maxV += 1; }
 
-  // Plot line
+  // Linea de temperatura
   ctx.lineWidth = 3;
   ctx.strokeStyle = "rgba(124,92,255,0.95)";
   ctx.beginPath();
@@ -133,7 +138,7 @@ function drawChart() {
 
   ctx.stroke();
 
-  // Latest point
+  // Punto mas reciente
   const last = history[history.length - 1];
   const x = ( (history.length - 1) / (history.length - 1) ) * (w - 20) + 10;
   const y = h - ((last.value - minV) / (maxV - minV)) * (h - 20) - 10;
@@ -143,7 +148,7 @@ function drawChart() {
   ctx.arc(x, y, 5, 0, Math.PI * 2);
   ctx.fill();
 
-  // Min/Max labels
+  // Etiquetas min/max
   ctx.fillStyle = "rgba(255,255,255,0.65)";
   ctx.font = "14px ui-sans-serif, system-ui";
   ctx.fillText(`max ${maxV.toFixed(1)}°C`, 12, 18);

@@ -8,6 +8,7 @@
   </head>
 
   <body>
+    <!-- Top bar with brand + MQTT status -->
     <header class="topbar">
       <div class="brand">
         <div class="logo">◎</div>
@@ -23,6 +24,7 @@
       </div>
     </header>
 
+    <!-- Main grid: camera card + telemetry card -->
     <main class="grid">
       <section class="card">
         <div class="cardHeader">
@@ -48,6 +50,7 @@
           <div class="pill" id="topicPill">topic: —</div>
         </div>
 
+        <!-- Temperature headline + last update -->
         <div class="tempRow">
           <div class="tempValue">
             <span id="tempNumber">—</span>
@@ -59,6 +62,7 @@
           </div>
         </div>
 
+        <!-- Secondary telemetry stats -->
         <div class="telemetryRow">
           <div class="telemetryStat">
             <div class="label">Humidity</div>
@@ -76,6 +80,7 @@
           </div>
         </div>
 
+        <!-- Simple canvas chart -->
         <div class="chartWrap">
           <canvas id="tempChart" width="800" height="260"></canvas>
         </div>
@@ -86,6 +91,7 @@
       </section>
     </main>
 
+    <!-- Footer -->
     <footer class="footer">
       <span>Local dashboard • Node.js + MQTT + Socket.IO</span>
     </footer>

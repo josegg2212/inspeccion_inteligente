@@ -12,9 +12,9 @@ import numpy as np
 import libcamera
 from picamera2 import Picamera2, Preview
 
-from .cliente_api import ClienteAPI
+from cliente_api import ClienteAPI
 
-
+# Clase que representa una zona de inspección con sus parámetros
 @dataclass(frozen=True)
 class ZonaInspeccion:
     id: str
@@ -24,6 +24,7 @@ class ZonaInspeccion:
     espera_s: float
 
     def metadata_dict(self) -> dict:
+        # Metadata esperada por la API para convertir angulo a unidades
         return {
             "MEASURE_SCALE": {
                 "UNIT": self.unit,
@@ -33,23 +34,9 @@ class ZonaInspeccion:
         }
 
 
+# Clase que maneja la cámara PiCamera2
 class Camara:
-    """
-    Igual que el script que te funciona:
-    - preview QTGL (o QT) a 640x480
-    - forzar ScalerCrop al sensor completo (evita el mega zoom)
-    - captura con capture_array + cv2.imwrite (evita simplejpeg)
-    """
-
-    def __init__(
-        self,
-        preview_size: Tuple[int, int] = (640, 480),
-        sensor_full_crop: Tuple[int, int, int, int] = (0, 0, 3280, 2464),  # Camera v2
-        vflip: bool = True,
-        hflip: bool = False,
-        preview: bool = True,
-        preview_mode: str = "qtgl",  # "qtgl" | "qt" | "drm" | "null"
-    ) -> None:
+    def __init__(self, preview_size: Tuple[int, int] = (640, 480), sensor_full_crop: Tuple[int, int, int, int] = (0, 0, 3280, 2464), vflip: bool = True, hflip: bool = False, preview: bool = True, preview_mode: str = "qtgl") -> None:
         self.preview_size = preview_size
         self.sensor_full_crop = sensor_full_crop
         self.vflip = vflip
@@ -59,41 +46,31 @@ class Camara:
         self.cam: Optional[Picamera2] = None
 
     def start(self) -> None:
+        # Inicializa camara y configura preview/crop
         self.cam = Picamera2()
 
         cfg = self.cam.create_preview_configuration(main={"size": self.preview_size})
         cfg["transform"] = libcamera.Transform(vflip=self.vflip, hflip=self.hflip)
         self.cam.configure(cfg)
 
-        if self.preview:
-            try:
-                if self.preview_mode == "qtgl":
-                    self.cam.start_preview(Preview.QTGL)
-                elif self.preview_mode == "qt":
-                    self.cam.start_preview(Preview.QT)
-                elif self.preview_mode == "drm":
-                    self.cam.start_preview(Preview.DRM)
-                else:
-                    self.cam.start_preview(Preview.NULL)
-            except Exception as e:
-                print(f"[Camara] No se pudo iniciar preview ({self.preview_mode}): {e}")
+        self.cam.start_preview(Preview.QTGL)
 
         self.cam.start()
         time.sleep(0.2)
 
-        # 👇 CLAVE: evita el "mega zoom" fijando el crop al sensor completo (v2)
         try:
             self.cam.set_controls({"ScalerCrop": self.sensor_full_crop})
         except Exception as e:
             print(f"[Camara] No se pudo aplicar ScalerCrop={self.sensor_full_crop}: {e}")
 
     def captura(self, output_path: Path) -> Path:
+        # Captura un frame y lo guarda como JPG
         if self.cam is None:
             raise RuntimeError("Cámara no iniciada. Llama a start().")
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        frame = self.cam.capture_array("main")  # RGB
+        frame = self.cam.capture_array("main")  
         frame = np.ascontiguousarray(frame)
 
         frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
@@ -103,6 +80,7 @@ class Camara:
         return output_path
 
     def stop(self) -> None:
+        # Apagado seguro de la camara
         if self.cam is not None:
             try:
                 if self.preview:
@@ -120,18 +98,9 @@ class Camara:
         self.cam = None
 
 
+# Clase principal que simula el robot de inspección
 class RobotInspeccion:
-    """Simula el robot: recorre zonas y en cada una captura + llama a la API."""
-
-    def __init__(
-        self,
-        zonas: List[ZonaInspeccion],
-        camara: Camara,
-        api: ClienteAPI,
-        evidencias_dir: Path,
-        loop: bool = True,
-        guardar_ultima: bool = True,
-    ) -> None:
+    def __init__(self, zonas: List[ZonaInspeccion], camara: Camara, api: ClienteAPI, evidencias_dir: Path, loop: bool = True, guardar_ultima: bool = True) -> None:
         self.zonas = zonas
         self.camara = camara
         self.api = api
@@ -141,6 +110,7 @@ class RobotInspeccion:
         self.running = False
 
     def run(self) -> None:
+        # Loop principal: captura -> envia API -> guarda evidencias
         self.running = True
         self.camara.start()
 
@@ -154,16 +124,16 @@ class RobotInspeccion:
                     img_in = self.evidencias_dir / f"{zona.id}_{ts}.jpg"
                     img_out = self.evidencias_dir / f"{zona.id}_{ts}_result.jpg"
 
-                    # 1) Captura
+                    # Captura local
                     self.camara.captura(img_in)
 
                     if self.guardar_ultima:
                         (self.evidencias_dir / "last.jpg").write_bytes(img_in.read_bytes())
 
-                    # 2) POST a la API
+                    # POST a la API de deteccion/lectura
                     status, headers, out_bytes = self.api.procesar(img_in, zona.metadata_dict())
 
-                    # 3) Guarda resultado si viene imagen
+                    # Guarda resultado si la respuesta trae imagen
                     if out_bytes:
                         img_out.parent.mkdir(parents=True, exist_ok=True)
                         img_out.write_bytes(out_bytes)
@@ -171,14 +141,14 @@ class RobotInspeccion:
                         if self.guardar_ultima:
                             (self.evidencias_dir / "last_result.jpg").write_bytes(out_bytes)
 
-                        # 3b) Si la lectura fue correcta (HTTP 200), guarda tambien en /ok
+                        # Si la lectura fue correcta (HTTP 200), guarda tambien en /ok
                         if status == 200:
                             ok_dir = self.evidencias_dir / "ok"
                             ok_dir.mkdir(parents=True, exist_ok=True)
                             (ok_dir / img_out.name).write_bytes(out_bytes)
                             (ok_dir / "last_ok_result.jpg").write_bytes(out_bytes)
 
-                    # 4) Info por consola
+                    # Info por consola
                     msg = headers.get("X-Message", "")
                     bboxes = headers.get("X-Bounding-Boxes", "[]")
                     print(f"[{zona.id}] status={status} msg='{msg}' bboxes={bboxes}")
@@ -199,35 +169,21 @@ class RobotInspeccion:
 
 
 def main() -> None:
+    # Configuracion base del simulador
     project_root = Path(__file__).resolve().parents[2]
     evidencias_dir = project_root / "data" / "evidencias"
     evidencias_dir.mkdir(parents=True, exist_ok=True)
 
-    url_md = "http://127.0.0.1:5000/MD"
+    url_endpoint_api = "http://0.0.0.0:5000/process_camera_image"
 
     zonas = [
-        ZonaInspeccion("zona_A", "bar", 0.0, 10.0, espera_s=5.0),
-        ZonaInspeccion("zona_B", "bar", 0.0, 16.0, espera_s=7.0),
+        ZonaInspeccion("zona_A", "bar", 0.0, 1.0, espera_s=10.0),
+        ZonaInspeccion("zona_B", "bar", 0.0, 25.0, espera_s=10.0),
     ]
 
-    camara = Camara(
-        preview_size=(640, 480),
-        sensor_full_crop=(0, 0, 3280, 2464),  # Camera v2
-        vflip=True,
-        hflip=False,
-        preview=True,
-        preview_mode="qtgl",  # como el script que te funciona
-    )
-
-    api = ClienteAPI(url_md=url_md)
-    robot = RobotInspeccion(
-        zonas=zonas,
-        camara=camara,
-        api=api,
-        evidencias_dir=evidencias_dir,
-        loop=True,
-        guardar_ultima=True,
-    )
+    camara = Camara(preview_size=(640, 480), sensor_full_crop=(0, 0, 3280, 2464), vflip=True, hflip=False, preview=True, preview_mode="qtgl")
+    api = ClienteAPI(url_endpoint=url_endpoint_api)
+    robot = RobotInspeccion(zonas=zonas, camara=camara, api=api, evidencias_dir=evidencias_dir, loop=True, guardar_ultima=True)
     robot.run()
 
 

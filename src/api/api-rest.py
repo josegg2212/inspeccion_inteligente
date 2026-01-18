@@ -1,20 +1,3 @@
-"""Single-file FastAPI service for manometer detection + lecture.
-
-- Exposes POST /MD that receives:
-  - file: image
-  - metadata: JSON file with MEASURE_SCALE {UNIT, MAX, MIN}
-- Returns an annotated JPEG image.
-- Adds headers:
-  - X-Message
-  - X-Bounding-Boxes (JSON list)
-
-New:
-- Saves *successful* readings (HTTP 200) into ./ok/
-- Exposes GET /MD/last_ok that returns the last successfully processed image.
-
-This file inlines the previous ApiRestWrapper so you only need one script.
-"""
-
 from __future__ import annotations
 
 import json
@@ -32,13 +15,8 @@ from pathlib import Path
 from yolo_detection import YoloDetector
 from yolo_detection_lecture_manometer import YoloDetectorLecture
 
-
+# Wrapper basico de FastAPI para definir rutas dinamicamente
 class ApiRestWrapper:
-    """Tiny wrapper around FastAPI + uvicorn.
-
-    routes: [(url, methods, callback)]
-    """
-
     def __init__(self, host: str, port: int, routes=None):
         self.app = FastAPI()
         self.host = host
@@ -54,7 +32,7 @@ class ApiRestWrapper:
         uvicorn.run(self.app, host=self.host, port=self.port)
 
 
-# Paths (keep temp ephemeral; keep ok persistent)
+# Paths: temp es efimero para cada request; ok es persistente para historico
 BASE_DIR = Path(__file__).resolve().parent
 TEMP_DIR = BASE_DIR / "temp"
 OK_DIR = BASE_DIR / "ok"
@@ -62,46 +40,41 @@ OK_RESULTS_DIR = OK_DIR / "results"
 OK_INPUTS_DIR = OK_DIR / "inputs"
 LAST_OK_PATH = OK_DIR / "last_ok.jpg"
 
-# Model weights
+# Model weights (modelos entrenados)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DETECT_MODEL_PATH = str(PROJECT_ROOT / "models" / "manometer_detection_model.pt")
 LECTURE_MODEL_PATH = str(PROJECT_ROOT / "models" / "manometer_lecture_model.pt")
 
-
+# Clase principal del API REST que orquesta el flujo completo
 class ManometerDetect:
     """FastAPI endpoint handler for manometer detection and lecture."""
 
-    def __init__(self, host: str, port: int, endpoint: str) -> None:
+    def __init__(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
-        self.endpoint = endpoint
 
         self.MEASURE_UNIT = ""
         self.MEASURE_MAX = 0.0
         self.MEASURE_MIN = 0.0
 
-        # Ensure persistent dirs exist
+        # Asegura carpetas persistentes para historico de entradas/salidas
         OK_INPUTS_DIR.mkdir(parents=True, exist_ok=True)
         OK_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
+        # API wrapper y rutas disponibles
         self.apirest_wrapper = ApiRestWrapper(self.host, self.port)
         self.apirest_wrapper.setup_routes(
             [
-                (endpoint, ["POST"], self.endpoint_callback),
-                (endpoint + "/last_ok", ["GET"], self.get_last_ok),
+                ("/process_camera_image", ["POST"], self.procces_camera_image),
+                ("/get_last_ok", ["GET"], self.get_last_ok),
             ]
         )
 
     def start(self):
         self.apirest_wrapper.run_app()
 
-    async def endpoint_callback(
-        self,
-        file: UploadFile = File(...),
-        metadata: UploadFile = File(...),
-    ):
-        """Receive image + metadata, process and return annotated image."""
-
+    # Endpoint principal: recibe imagen + metadata y devuelve imagen anotada
+    async def procces_camera_image(self, file: UploadFile = File(...), metadata: UploadFile = File(...)):
         metadata_content = await metadata.read()
         try:
             config_data = json.loads(metadata_content)
@@ -109,11 +82,13 @@ class ManometerDetect:
             raise HTTPException(status_code=400, detail=f"Invalid metadata JSON: {e}")
 
         try:
+            # Pipeline completo de procesamiento
             response = self.process_image(file, config_data)
 
             if response["code"] == 400:
                 raise HTTPException(status_code=400, detail=response["message"])
 
+            # Se devuelven mensajes y bboxes en headers para el cliente
             headers = {
                 "X-Message": response["message"],
                 "X-Bounding-Boxes": json.dumps(response["bboxes"].tolist()),
@@ -131,7 +106,7 @@ class ManometerDetect:
             raise HTTPException(status_code=400, detail=str(e))
 
     def get_last_ok(self):
-        """Return the last successfully processed image (HTTP 200)."""
+        # Endpoint auxiliar para consultar la ultima imagen exitosa
         if not LAST_OK_PATH.exists():
             raise HTTPException(status_code=404, detail="No successful image processed yet")
 
@@ -142,8 +117,8 @@ class ManometerDetect:
             status_code=200,
         )
 
+    # Orquestador del flujo: validacion -> temp -> deteccion -> lectura -> salida
     def process_image(self, file: UploadFile, config_data: dict):
-        # Store metadata parameters
         try:
             self.MEASURE_UNIT = config_data["MEASURE_SCALE"]["UNIT"]
             self.MEASURE_MAX = float(config_data["MEASURE_SCALE"]["MAX"])
@@ -156,29 +131,29 @@ class ManometerDetect:
                 "bboxes": np.zeros((0, 4), dtype=int),
             }
 
-        # Clean temp for this request
+        # Limpia temp para esta request
         if TEMP_DIR.exists():
             shutil.rmtree(TEMP_DIR)
         TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Save input file to disk
+        # Guarda el input en disco para reutilizar en el pipeline
         file_path = TEMP_DIR / file.filename
         with open(file_path, "wb") as f:
             f.write(file.file.read())
 
-        # Keep a copy of the original input (because we overwrite file_path after crop)
+        # Copia del original para persistir si todo sale bien
         raw_copy_path = TEMP_DIR / f"raw_{file.filename}"
         shutil.copyfile(file_path, raw_copy_path)
 
-        # 1) Detect & crop manometer
+        # Deteccion y recorte del manometro
         response = self.detect_manometer(str(file_path))
         if response["code"] != 200:
             return response
         detected_image_path = response["data"]
         bboxes = response["bboxes"]
 
-        # 2) Regress angle
-        response = self.regress_angle(detected_image_path)
+        # Lectura de angulos con el segundo modelo
+        response = self.read_manometer(detected_image_path)
         if response["code"] != 200:
             return response
 
@@ -187,29 +162,20 @@ class ManometerDetect:
         min_angle = response["data"]["min_angle"]
         points = response["data"]["points"]
 
-        # 3) Save final annotated image
-        out = self.save_output_image(
-            file.filename,
-            detected_image_path,
-            angle,
-            max_angle,
-            min_angle,
-            points,
-            bboxes,
-        )
+        # Genera imagen anotada final
+        out = self.save_output_image(file.filename, detected_image_path, angle, max_angle, min_angle, points, bboxes)
 
-        # 4) Persist ONLY if it was a successful reading
+        # Persiste solo si fue una lectura exitosa
         if out.get("code") == 200:
             try:
                 self.persist_success(raw_copy_path, Path(out["data"]), file.filename)
             except Exception:
-                # Don't break the request just because persistence failed
                 pass
 
         return out
 
+    # Copia entradas/salidas a carpeta persistente y actualiza last_ok
     def persist_success(self, raw_path: Path, result_path: Path, original_filename: str) -> None:
-        """Copy successful inputs/results to ./ok and update ./ok/last_ok.jpg."""
         OK_INPUTS_DIR.mkdir(parents=True, exist_ok=True)
         OK_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -226,6 +192,7 @@ class ManometerDetect:
         # Update last_ok
         shutil.copyfile(dst_out, LAST_OK_PATH)
 
+    # Deteccion de manometro con YOLO (opcionalmente recorta)
     def detect_manometer(self, file_path: str, crop: bool = True):
         try:
             yolo_detector = YoloDetector(DETECT_MODEL_PATH)
@@ -242,7 +209,7 @@ class ManometerDetect:
             if crop:
                 cropped_image = self.crop_image(detected_image, bboxes)
 
-                # Resize and save cropped image (lecture model expects 640x640)
+                # Resize and save cropped image
                 cropped_image = cv2.resize(cropped_image, (640, 640))
                 cv2.imwrite(file_path, cropped_image)
 
@@ -268,6 +235,7 @@ class ManometerDetect:
             "bboxes": bboxes.cpu().numpy().astype(int),
         }
 
+    # Recorte del primer bbox con un margen pequeno
     def crop_image(self, detected_image, bboxes):
         h_img, w_img = detected_image.shape[:2]
         x1, y1, x2, y2 = bboxes[0].cpu().numpy().astype(int)
@@ -284,7 +252,8 @@ class ManometerDetect:
 
         return detected_image[y1m:y2m, x1m:x2m]
 
-    def regress_angle(self, detected_image_path: str):
+    # Lectura de puntos clave con modelo de "lecture"
+    def read_manometer(self, detected_image_path: str):
         try:
             detection_lecture = YoloDetectorLecture(LECTURE_MODEL_PATH)
             points = detection_lecture.process_image(detected_image_path)
@@ -316,6 +285,7 @@ class ManometerDetect:
             "bboxes": np.zeros((0, 4), dtype=int),
         }
 
+    # Geometria de angulos usando base, punta, minimo y maximo
     def compute_geometry(self, points: dict):
         # Tip angle
         x0, y0 = points["base"]
@@ -335,16 +305,8 @@ class ManometerDetect:
 
         return angle, max_angle, min_angle, points
 
-    def save_output_image(
-        self,
-        filename: str,
-        segmented_img_path: str,
-        angle: float,
-        max_angle: float,
-        min_angle: float,
-        points: dict,
-        bboxes,
-    ):
+    # Renderiza anotaciones y guarda la imagen final en temp
+    def save_output_image(self, filename: str, segmented_img_path: str, angle: float, max_angle: float, min_angle: float, points: dict, bboxes):
         level = self.get_level_from_angle(angle, max_angle, min_angle)
 
         segmented_img = cv2.imread(segmented_img_path)
@@ -366,16 +328,7 @@ class ManometerDetect:
         plt.axis("off")
 
         bbox_props = dict(boxstyle="square,pad=0.3", ec="white", lw=2, fc="white", alpha=0.7)
-        plt.text(
-            123,
-            120,
-            f"{level:.2f}{self.MEASURE_UNIT}",
-            color="black",
-            fontsize=20,
-            fontweight="bold",
-            ha="right",
-            bbox=bbox_props,
-        )
+        plt.text(123, 120, f"{level:.2f}{self.MEASURE_UNIT}", color="black", fontsize=20, fontweight="bold", ha="right", bbox=bbox_props,)
 
         name, extension = filename.rsplit(".", 1)
         result_name = f"{name}_result.{extension}"
@@ -386,6 +339,7 @@ class ManometerDetect:
 
         return {"code": 200, "message": "Image saved", "data": str(out_path), "bboxes": bboxes}
 
+    # Convierte el angulo a nivel en unidades de la escala configurada
     def get_level_from_angle(self, angle: float, max_angle: float, min_angle: float) -> float:
         level = 100 * (angle - min_angle) / (max_angle - min_angle)
         level = np.clip(level, 0, 100)
@@ -394,9 +348,9 @@ class ManometerDetect:
 
 
 if __name__ == "__main__":
+    # Ejecucion local del servidor
     host = "0.0.0.0"
     port = 5000
-    endpoint = "/MD"
 
-    manometer_detect = ManometerDetect(host, port, endpoint)
+    manometer_detect = ManometerDetect(host, port)
     manometer_detect.start()

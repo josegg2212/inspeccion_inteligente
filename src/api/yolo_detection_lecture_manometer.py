@@ -6,7 +6,7 @@ class YoloDetectorLecture:
     def __init__(self, model_path):
         # Carga del modelo YOLO entrenado para lectura
         self.model = YOLO(model_path)
-        # Mapeo de las clases entrenadas a nombres semánticos
+        # Mapeo de clases entrenadas a nombres semanticamente utiles
         self.class_map = {
             0: 'base',
             1: 'maximum',
@@ -15,13 +15,13 @@ class YoloDetectorLecture:
         }
 
     def process_image(self, source, show: bool = False, save: bool = False):
-
+        # Inferencia y extraccion de centroides de cada deteccion
         results = self.model(source=source, show=False, save=False)
 
         res = results[0]
 
         points = {}
-        # Recorremos cada detección
+        # Recorre detecciones y guarda punto central por clase
         for box, cls in zip(res.boxes.xyxy.cpu().numpy(), res.boxes.cls.cpu().numpy()):
             x1, y1, x2, y2 = box.astype(int)
             cx = int((x1 + x2) / 2)
@@ -33,7 +33,6 @@ class YoloDetectorLecture:
         return points
 
        
-
 
 
 

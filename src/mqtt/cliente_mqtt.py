@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 from sense_hat import SenseHat
 
-BROKER_HOST = "127.0.0.1"   # <-- si el broker está en otra máquina, pon aquí su IP
+BROKER_HOST = "0.0.0.0"  
 BROKER_PORT = 1883
 
 TOPIC = "sensors/telemetry"
@@ -16,15 +16,12 @@ RETAIN = True
 
 sense = SenseHat()
 
+# Lee sensores de Sense HAT y genera payload normalizado
 def read_telemetry():
     humidity = float(sense.get_humidity())
-
-    # Práctica 2: temperaturas recomendadas
     temp_h = float(sense.get_temperature_from_humidity())
     temp_p = float(sense.get_temperature_from_pressure())
-    temperature = temp_h  # o (temp_h + temp_p) / 2.0
-
-    # Práctica 2: primera presión puede salir 0 -> repetir
+    temperature = temp_h 
     pressure = float(sense.get_pressure())
     if pressure == 0.0:
         time.sleep(0.05)
@@ -38,6 +35,7 @@ def read_telemetry():
         "pressure": round(pressure, 2),
     }
 
+# Publicador MQTT: envia telemetria en intervalos fijos
 def main():
     client = mqtt.Client(client_id="rpi-sensehat-pub", clean_session=True)
     client.connect(BROKER_HOST, BROKER_PORT, keepalive=60)
