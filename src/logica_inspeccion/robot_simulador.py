@@ -13,6 +13,10 @@ import libcamera
 from picamera2 import Picamera2, Preview
 
 from cliente_api import ClienteAPI
+try:
+    from sense_hat import SenseHat
+except Exception:
+    SenseHat = None
 
 # Clase que representa una zona de inspección con sus parámetros
 @dataclass(frozen=True)
@@ -114,6 +118,7 @@ class RobotInspeccion:
         # Loop principal: captura -> envia API -> guarda evidencias
         self.running = True
         self.camara.start()
+        sense = SenseHat() if SenseHat else None
 
         try:
             while self.running:
@@ -124,6 +129,13 @@ class RobotInspeccion:
                     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
                     img_in = self.evidencias_dir / f"{zona.id}_{ts}.jpg"
                     img_out = self.evidencias_dir / f"{zona.id}_{ts}_result.jpg"
+
+                    # Cuenta atras en Sense HAT antes de capturar
+                    if sense:
+                        for n in (3, 2, 1):
+                            sense.show_letter(str(n))
+                            time.sleep(1)
+                        sense.clear()
 
                     # Captura local
                     self.camara.captura(img_in)
