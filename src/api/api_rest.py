@@ -12,8 +12,8 @@ from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pathlib import Path
 
-from yolo_detection import YoloDetector
-from yolo_detection_lecture_manometer import YoloDetectorLecture
+from gauge_detection import YoloDetector
+from gauge_lecture import YoloDetectorLecture
 
 # Wrapper basico de FastAPI para definir rutas dinamicamente
 class ApiRestWrapper:
