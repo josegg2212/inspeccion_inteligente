@@ -23,7 +23,7 @@ class ClienteAPI:
                 "file": (image_path.name, f, "image/jpeg"),
                 "metadata": ("metadata.json", metadata_bytes, "application/json"),
             }
-            r = self.session.post(self.url_md, files=files, timeout=self.timeout_s)
+            r = self.session.post(self.url_endpoint, files=files, timeout=self.timeout_s)
 
         # Solo devuelve bytes si la respuesta es una imagen
         img_bytes = None
