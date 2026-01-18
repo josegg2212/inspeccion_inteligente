@@ -181,7 +181,7 @@ def main() -> None:
         ZonaInspeccion("zona_B", "bar", 0.0, 25.0, espera_s=10.0),
     ]
 
-    camara = Camara(preview_size=(640, 480), sensor_full_crop=(0, 0, 3280, 2464), vflip=True, hflip=False, preview=True, preview_mode="qtgl")
+    camara = Camara(preview_size=(640, 480), sensor_full_crop=(0, 0, 3280, 2464), vflip=True, hflip=True, preview=True, preview_mode="qtgl")
     api = ClienteAPI(url_endpoint=url_endpoint_api)
     robot = RobotInspeccion(zonas=zonas, camara=camara, api=api, evidencias_dir=evidencias_dir, loop=True, guardar_ultima=True)
     robot.run()
